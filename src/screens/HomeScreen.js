@@ -13,12 +13,15 @@ import Animated, { FadeInUp } from "react-native-reanimated";
 import { NEWS_API_KEY } from "../config";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Accelerometer } from "expo-sensors";
+import * as Haptics from "expo-haptics";
 
 const HomeScreen = ({ navigation }) => {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Setup nút search trong header
   React.useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
@@ -36,76 +39,76 @@ const HomeScreen = ({ navigation }) => {
     });
   }, [navigation]);
 
-  useEffect(() => {
-    const fetchNews = async () => {
-      setLoading(true);
-      try {
-        const cachedArticles = await AsyncStorage.getItem("cachedArticles");
-        if (cachedArticles) {
-          setArticles(JSON.parse(cachedArticles));
-          setLoading(false);
-          return;
-        }
-
-        const response = await axios.get(
-          `https://newsdata.io/api/1/news?apikey=${NEWS_API_KEY}&country=us&language=en`
-        );
-        const fetchedArticles = response.data.results || [];
-        setArticles(fetchedArticles);
-        await AsyncStorage.setItem(
-          "cachedArticles",
-          JSON.stringify(fetchedArticles)
-        );
-        setError(null);
-      } catch (error) {
-        if (error.response && error.response.status === 429) {
-          setError("Quá nhiều yêu cầu. Vui lòng thử lại sau.");
-        } else if (error.response && error.response.status === 401) {
-          setError("Khóa API không hợp lệ. Vui lòng kiểm tra lại.");
-        } else {
-          setError(
-            "Không thể tải tin tức. Vui lòng kiểm tra kết nối hoặc thử lại."
-          );
-        }
-        console.error("Lỗi khi tải tin tức:", error);
-      } finally {
+  // Fetch API news
+  const fetchNews = async () => {
+    setLoading(true);
+    try {
+      const cachedArticles = await AsyncStorage.getItem("cachedArticles");
+      if (cachedArticles) {
+        setArticles(JSON.parse(cachedArticles));
         setLoading(false);
+        return;
       }
-    };
+
+      const response = await axios.get(
+        `https://newsdata.io/api/1/news?apikey=${NEWS_API_KEY}&country=us&language=en`
+      );
+      const fetchedArticles = response.data.results || [];
+      setArticles(fetchedArticles);
+      await AsyncStorage.setItem(
+        "cachedArticles",
+        JSON.stringify(fetchedArticles)
+      );
+      setError(null);
+    } catch (error) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      if (error.response && error.response.status === 429) {
+        setError("Quá nhiều yêu cầu. Vui lòng thử lại sau.");
+      } else if (error.response && error.response.status === 401) {
+        setError("Khóa API không hợp lệ. Vui lòng kiểm tra lại.");
+      } else {
+        setError(
+          "Không thể tải tin tức. Vui lòng kiểm tra kết nối hoặc thử lại."
+        );
+      }
+      console.error("Lỗi khi tải tin tức:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchNews();
   }, []);
 
+  // Lắc để reload
+  useEffect(() => {
+    let subscription;
+    let lastShake = Date.now();
+
+    const subscribe = () => {
+      subscription = Accelerometer.addListener(({ x, y, z }) => {
+        const total = Math.sqrt(x * x + y * y + z * z);
+        const now = Date.now();
+        if (total > 1.78 && now - lastShake > 1500) {
+          lastShake = now;
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          handleRefresh();
+        }
+      });
+      Accelerometer.setUpdateInterval(300);
+    };
+
+    subscribe();
+    return () => {
+      if (subscription) subscription.remove();
+    };
+  }, []);
+
+  // Manual refresh
   const handleRefresh = async () => {
     await AsyncStorage.removeItem("cachedArticles");
     setArticles([]);
-    const fetchNews = async () => {
-      setLoading(true);
-      try {
-        const response = await axios.get(
-          `https://newsdata.io/api/1/news?apikey=${NEWS_API_KEY}&country=us&language=en`
-        );
-        const fetchedArticles = response.data.results || [];
-        setArticles(fetchedArticles);
-        await AsyncStorage.setItem(
-          "cachedArticles",
-          JSON.stringify(fetchedArticles)
-        );
-        setError(null);
-      } catch (error) {
-        if (error.response && error.response.status === 429) {
-          setError("Quá nhiều yêu cầu. Vui lòng thử lại sau.");
-        } else if (error.response && error.response.status === 401) {
-          setError("Khóa API không hợp lệ. Vui lòng kiểm tra lại.");
-        } else {
-          setError(
-            "Không thể tải tin tức. Vui lòng kiểm tra kết nối hoặc thử lại."
-          );
-        }
-        console.error("Lỗi khi tải tin tức:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchNews();
   };
 
@@ -113,7 +116,10 @@ const HomeScreen = ({ navigation }) => {
     <Animated.View entering={FadeInUp.delay(index * 100).duration(500)}>
       <TouchableOpacity
         style={styles.itemContainer}
-        onPress={() => navigation.navigate("Detail", { article: item })}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          navigation.navigate("Detail", { article: item });
+        }}
         activeOpacity={0.8}
       >
         <Image
